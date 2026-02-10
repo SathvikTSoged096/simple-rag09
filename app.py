@@ -26,7 +26,7 @@ uploaded_files = st.file_uploader(
 # ----------------------------
 # Create vector store
 # ----------------------------
-@st.cache_resource
+@st.cache_resource(show_spinner="Indexing documents...")
 def create_vectorstore(uploaded_files):
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -35,18 +35,34 @@ def create_vectorstore(uploaded_files):
     all_docs = []
 
     for uploaded_file in uploaded_files:
+        # 🔑 IMPORTANT: reset pointer
+        uploaded_file.seek(0)
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(uploaded_file.read())
             tmp_path = tmp.name
 
         loader = PyPDFLoader(tmp_path)
-        all_docs.extend(loader.load())
+        docs = loader.load()
+
+        if docs:
+            all_docs.extend(docs)
+
+    # 🚨 SAFETY CHECK 1
+    if not all_docs:
+        st.error("❌ No text could be extracted from the uploaded PDFs.")
+        st.stop()
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=50
     )
     chunks = splitter.split_documents(all_docs)
+
+    # 🚨 SAFETY CHECK 2
+    if not chunks:
+        st.error("❌ Text splitting produced no chunks.")
+        st.stop()
 
     db = FAISS.from_documents(chunks, embeddings)
     return db
