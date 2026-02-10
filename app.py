@@ -11,7 +11,7 @@ st.set_page_config(page_title="RAG PDF Q&A", layout="centered")
 st.title("📄 RAG System – PDF Question Answering")
 
 st.write(
-    "Upload one or more PDF files. The system will index them and allow you to ask questions."
+    "Upload one or more PDF files. The system will answer questions ONLY if they are relevant to the document."
 )
 
 # ----------------------------
@@ -35,7 +35,6 @@ def create_vectorstore(uploaded_files):
     all_docs = []
 
     for uploaded_file in uploaded_files:
-        # 🔑 IMPORTANT: reset pointer
         uploaded_file.seek(0)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -48,7 +47,6 @@ def create_vectorstore(uploaded_files):
         if docs:
             all_docs.extend(docs)
 
-    # 🚨 SAFETY CHECK 1
     if not all_docs:
         st.error("❌ No text could be extracted from the uploaded PDFs.")
         st.stop()
@@ -59,7 +57,6 @@ def create_vectorstore(uploaded_files):
     )
     chunks = splitter.split_documents(all_docs)
 
-    # 🚨 SAFETY CHECK 2
     if not chunks:
         st.error("❌ Text splitting produced no chunks.")
         st.stop()
@@ -79,10 +76,21 @@ if uploaded_files:
     query = st.text_input("Ask a question from the uploaded documents:")
 
     if query:
-        docs = db.similarity_search(query, k=3)
+        # 🔑 USE SCORED SEARCH
+        results = db.similarity_search_with_score(query, k=5)
+
+        THRESHOLD = 0.6  # lower = stricter (recommended: 0.4–0.6)
+
+        relevant_docs = [
+            doc for doc, score in results if score < THRESHOLD
+        ]
+
+        if not relevant_docs:
+            st.warning("❌ This question is NOT related to the uploaded document.")
+            st.stop()
 
         st.subheader("🔍 Retrieved Answer")
-        for i, doc in enumerate(docs, 1):
+        for i, doc in enumerate(relevant_docs, 1):
             st.markdown(f"**Result {i}:**")
             st.write(doc.page_content)
 
