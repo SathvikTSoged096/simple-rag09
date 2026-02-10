@@ -1,51 +1,74 @@
-import os
 import streamlit as st
+import tempfile
+import os
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
-st.set_page_config(page_title="Simple RAG App")
-st.title("📘 Simple RAG System")
+st.set_page_config(page_title="RAG PDF Q&A", layout="centered")
+st.title("📄 RAG System – PDF Question Answering")
 
-PDF_PATH = "data/notes.pdf"
-INDEX_PATH = "faiss_index"
+st.write(
+    "Upload one or more PDF files. The system will index them and allow you to ask questions."
+)
 
+# ----------------------------
+# Upload PDFs
+# ----------------------------
+uploaded_files = st.file_uploader(
+    "Upload PDF files",
+    type=["pdf"],
+    accept_multiple_files=True
+)
+
+# ----------------------------
+# Create vector store
+# ----------------------------
 @st.cache_resource
-def load_or_create_db():
+def create_vectorstore(uploaded_files):
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    if not os.path.exists(INDEX_PATH):
-        st.info("Creating vector index for the first time...")
+    all_docs = []
 
-        loader = PyPDFLoader(PDF_PATH)
-        documents = loader.load()
+    for uploaded_file in uploaded_files:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded_file.read())
+            tmp_path = tmp.name
 
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50
-        )
-        chunks = splitter.split_documents(documents)
+        loader = PyPDFLoader(tmp_path)
+        all_docs.extend(loader.load())
 
-        db = FAISS.from_documents(chunks, embeddings)
-        db.save_local(INDEX_PATH)
-    else:
-        db = FAISS.load_local(
-            INDEX_PATH,
-            embeddings,
-            allow_dangerous_deserialization=True
-        )
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50
+    )
+    chunks = splitter.split_documents(all_docs)
 
+    db = FAISS.from_documents(chunks, embeddings)
     return db
 
-db = load_or_create_db()
 
-query = st.text_input("Ask a question from the notes:")
+# ----------------------------
+# RAG UI
+# ----------------------------
+if uploaded_files:
+    st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
 
-if query:
-    docs = db.similarity_search(query, k=3)
-    st.subheader("Retrieved Answer")
-    for doc in docs:
-        st.write(doc.page_content)
+    db = create_vectorstore(uploaded_files)
+
+    query = st.text_input("Ask a question from the uploaded documents:")
+
+    if query:
+        docs = db.similarity_search(query, k=3)
+
+        st.subheader("🔍 Retrieved Answer")
+        for i, doc in enumerate(docs, 1):
+            st.markdown(f"**Result {i}:**")
+            st.write(doc.page_content)
+
+else:
+    st.info("Please upload at least one PDF file to begin.")
